@@ -25,8 +25,8 @@ namespace JSONSplitter
 
         private void CreateBlockContent_Click(object sender, EventArgs e)
         {
-           
-            
+
+
             var destinationPath = lblPath.Text;
             var proceed = true;
 
@@ -36,7 +36,7 @@ namespace JSONSplitter
                 proceed = false;
             }
 
-            if (string.IsNullOrEmpty(txtBlockTypeNames.Text) )
+            if (string.IsNullOrEmpty(txtBlockTypeNames.Text))
             {
                 MessageBox.Show(@"There are no block types name ");
                 proceed = false;
@@ -56,7 +56,7 @@ namespace JSONSplitter
 
             if (proceed)
             {
-                var blockNames = txtBlockTypeNames.Text.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                var blockNames = txtBlockTypeNames.Text.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries).OrderBy(x => x);
 
                 var blocksPath = Path.Combine(destinationPath, "Blocks");
 
@@ -66,6 +66,7 @@ namespace JSONSplitter
                     Directory.CreateDirectory(blocksPath);
                 }
 
+                var order = 100;
                 foreach (var blockNameRaw in blockNames)
                 {
                     var blockName = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(blockNameRaw.Trim()).Replace(" ", "");
@@ -79,8 +80,10 @@ namespace JSONSplitter
                     var blockCsFilePath = Path.Combine(blockFolderPath, $"{blockName}.cs");
                     var blockCshtmlFilePath = Path.Combine(blockFolderPath, $"{blockName}.cshtml");
 
-                    var csTemplate = ReplaceTokens(txtCSTemplate.Text, blockName, blockNameRaw, Guid.NewGuid().ToString());
-                    var cshtmlTemplate = ReplaceTokens(txtCSHTMLTemplate.Text, blockName, blockNameRaw, Guid.NewGuid().ToString());
+                    var blockNameFull = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(blockNameRaw.Replace("\r\n", "").Replace("\n", "")).Trim();
+
+                    var csTemplate = ReplaceTokens(txtCSTemplate.Text, blockName, blockNameFull, Guid.NewGuid().ToString(), order);
+                    var cshtmlTemplate = ReplaceTokens(txtCSHTMLTemplate.Text, blockName, blockNameFull, Guid.NewGuid().ToString(), order);
 
                     // Only create the .cs file if it doesn't already exist
                     if (!File.Exists(blockCsFilePath))
@@ -93,19 +96,23 @@ namespace JSONSplitter
                     {
                         File.WriteAllText(blockCshtmlFilePath, cshtmlTemplate);
                     }
+
+                    order = order + 50;
                 }
 
                 MessageBox.Show(@"SUCCESS");
             }
         }
 
-        private string ReplaceTokens(string template, string name, string nameRaw, string guid)
+        private string ReplaceTokens(string template, string name, string nameRaw, string guid, int order)
         {
-            return template.Replace("{{BLOCKNAME}}", name)
-                .Replace("{{BLOCKNAMERAW}}", nameRaw)
-                .Replace("{{GUID}}", guid);
+            return template.Replace("{{BLOCKNAME}}", name.Trim())
+                .Replace("{{BLOCKNAMERAW}}", nameRaw.Trim())
+                .Replace("{{BLOCKNAMERAWLOWER}}", nameRaw.Trim().ToLower())
+                .Replace("{{ORDER}}", order.ToString())
+                .Replace("{{GUID}}", guid.Trim());
         }
 
-    
+
     }
 }
