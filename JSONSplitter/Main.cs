@@ -1,8 +1,8 @@
 ﻿using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using Newtonsoft.Json;
 
 namespace JSONSplitter
 {
@@ -19,124 +19,93 @@ namespace JSONSplitter
             if (fbd.ShowDialog() == DialogResult.OK)
             {
                 lblPath.Text = fbd.SelectedPath;
-                btnSplit.Enabled = true;
+                btnGenerateBlockTypes.Enabled = true;
             }
-
-            wbMessage.DocumentText = "";
         }
 
-        private void btnSplit_Click(object sender, EventArgs e)
+        private void CreateBlockContent_Click(object sender, EventArgs e)
         {
-            wbMessage.DocumentText = "";
-            var path = lblPath.Text;
+           
+            
+            var destinationPath = lblPath.Text;
+            var proceed = true;
 
-            if (!string.IsNullOrEmpty(path) && !path.Equals("No path selected"))
+            if (string.IsNullOrEmpty(destinationPath) || destinationPath.Equals("No path selected"))
             {
-                string[] fileEntries = Directory.GetFiles(path);
-
-                var totalJsonFiles = fileEntries.Where(x => x.EndsWith(".json"));
-                if (totalJsonFiles.Any())
-                {
-
-                    var confirmationMesssage =
-                        "Split action will be perform on the following " + totalJsonFiles.Count() + " JSON files." + Environment.NewLine + Environment.NewLine;
-                    foreach (var filePath in fileEntries)
-                    {
-                        if (filePath.EndsWith(".json"))
-                        {
-                            var file = filePath.Replace(path, "").Replace(".json", "").Replace("\\", "")
-                                .Replace("/", "");
-
-                            confirmationMesssage = confirmationMesssage + "- " + file + ".json" + Environment.NewLine;
-                        }
-                    }
-
-                    MessageBox.Show(confirmationMesssage);
-                    var message = "";
-                    foreach (var filePath in fileEntries)
-                    {
-                        if (filePath.EndsWith(".json"))
-                        {
-                            var file = filePath.Replace(path, "").Replace(".json", "").Replace("\\", "")
-                                .Replace("/", "");
-
-                            message = message + SplitJsonFile(file, path);
-                        }
-                    }
-
-                    wbMessage.DocumentText = message;
-
-                }
-                else
-                {
-                    MessageBox.Show("No JSON file(s) in the path " + path);
-                }
+                MessageBox.Show(@"Select path to create block types structure");
+                proceed = false;
             }
-            else
+
+            if (string.IsNullOrEmpty(txtBlockTypeNames.Text) )
             {
-                MessageBox.Show("Select path to JSON file(s)");
+                MessageBox.Show(@"There are no block types name ");
+                proceed = false;
+            }
+
+            if (string.IsNullOrEmpty(txtCSTemplate.Text))
+            {
+                MessageBox.Show(@"The template for .cs is empty");
+                proceed = false;
+            }
+
+            if (string.IsNullOrEmpty(txtCSHTMLTemplate.Text))
+            {
+                MessageBox.Show(@"The template for razor view is empty");
+                proceed = false;
+            }
+
+            if (proceed)
+            {
+                var blockNames = txtBlockTypeNames.Text.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+                var blocksPath = Path.Combine(destinationPath, "Blocks");
+
+                // Check and create the "Blocks" folder if it doesn't exist
+                if (!Directory.Exists(blocksPath))
+                {
+                    Directory.CreateDirectory(blocksPath);
+                }
+
+                foreach (var blockNameRaw in blockNames)
+                {
+                    var blockName = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(blockNameRaw.Trim()).Replace(" ", "");
+                    var blockFolderPath = Path.Combine(blocksPath, blockName);
+
+                    if (!Directory.Exists(blockFolderPath))
+                    {
+                        Directory.CreateDirectory(blockFolderPath);
+                    }
+
+                    var blockCsFilePath = Path.Combine(blockFolderPath, $"{blockName}.cs");
+                    var blockCshtmlFilePath = Path.Combine(blockFolderPath, $"{blockName}.cshtml");
+
+                    var csTemplate = ReplaceTokens(txtCSTemplate.Text, blockName, blockNameRaw, Guid.NewGuid().ToString());
+                    var cshtmlTemplate = ReplaceTokens(txtCSHTMLTemplate.Text, blockName, blockNameRaw, Guid.NewGuid().ToString());
+
+                    // Only create the .cs file if it doesn't already exist
+                    if (!File.Exists(blockCsFilePath))
+                    {
+                        File.WriteAllText(blockCsFilePath, csTemplate);
+                    }
+
+                    // Only create the .cshtml file if it doesn't already exist
+                    if (!File.Exists(blockCshtmlFilePath))
+                    {
+                        File.WriteAllText(blockCshtmlFilePath, cshtmlTemplate);
+                    }
+                }
+
+                MessageBox.Show(@"SUCCESS");
             }
         }
 
-        private string SplitJsonFile(string file, string path)
+        private string ReplaceTokens(string template, string name, string nameRaw, string guid)
         {
-            try
-            {
-                using (StreamReader r = new StreamReader(path + "\\" + file + ".json"))
-                {
-                    var folderName = path + "\\" + file;
-
-                    if (Directory.Exists(folderName))
-                    {
-                        var dir = new DirectoryInfo(folderName);
-                        foreach (var f in dir.GetFiles())
-                        {
-                            f.Delete();
-                        }
-                    }
-                    else
-                        Directory.CreateDirectory(folderName);
-
-                    var json = r.ReadToEnd();
-
-                    dynamic stuff = JsonConvert.DeserializeObject(json);
-                    var count = 1;
-                    foreach (var s in stuff)
-                    {
-                        string fileName = file + count + ".json";
-                        var filePath = System.IO.Path.Combine(folderName, fileName);
-                        WriteToJsonFile(filePath, s, false);
-                        count++;
-
-                    }
-
-                    return "<strong>" + (count - 1) +
-                              "</strong> JSON files have been split from <strong>" + file +
-                              ".json</strong> file in the path: <strong>" + folderName + "</strong> </br> </br>";
-
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message);
-            }
-
-            return "";
+            return template.Replace("{{BLOCKNAME}}", name)
+                .Replace("{{BLOCKNAMERAW}}", nameRaw)
+                .Replace("{{GUID}}", guid);
         }
 
-        private void WriteToJsonFile(string filePath, dynamic objectToWrite, bool append = false)
-        {
-            TextWriter writer = null;
-            try
-            {
-                writer = new StreamWriter(filePath, append);
-                writer.Write(objectToWrite);
-            }
-            finally
-            {
-                if (writer != null)
-                    writer.Close();
-            }
-        }
+    
     }
 }
