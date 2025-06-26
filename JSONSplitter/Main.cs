@@ -74,11 +74,19 @@ namespace JSONSplitter
                 if (string.IsNullOrWhiteSpace(className))
                     continue;
 
-                var typeElement = new XElement(className.ToLowerInvariant(),
-                    new XElement("description", description ?? string.Empty),
-                    new XElement("name", displayName ?? className),
-                    new XElement("properties", properties.OrderBy(e => e.Name.LocalName))
-                );
+                var typeElement = new XElement(className.ToLowerInvariant());
+
+                if (!string.IsNullOrWhiteSpace(displayName))
+                {
+                    typeElement.Add(new XElement("name", displayName));
+                }
+
+                if (!string.IsNullOrWhiteSpace(description))
+                {
+                    typeElement.Add(new XElement("description", description));
+                }
+
+                typeElement.Add(new XElement("properties", properties.OrderBy(e => e.Name.LocalName)));
 
                 contentTypeElements.Add(typeElement);
             }
@@ -126,7 +134,7 @@ namespace JSONSplitter
                 return (null, null);
 
             var args = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
-            var name = ExtractNamedArgument(args, "DisplayName");
+            var name = ToTitleCase(ExtractNamedArgument(args, "DisplayName"));
             var desc = ExtractNamedArgument(args, "Description");
 
             return (name, desc);
@@ -151,14 +159,13 @@ namespace JSONSplitter
 
                 var args = displayMatch.Groups[1].Value;
                 var rawCaption = ExtractNamedArgument(args, "Name") ?? propName;
-                var caption = ToSentenceCaseKeepAllCaps(rawCaption);
-
-                var help = ExtractNamedArgument(args, "Description");
+                var caption = ToIntelligentSentenceCase(rawCaption);
 
                 var element = new XElement(propName.ToLowerInvariant(),
-                    new XElement("caption", caption)
-                );
+                        new XElement("caption", caption)
+                    );
 
+                var help = ExtractNamedArgument(args, "Description");
                 if (!string.IsNullOrWhiteSpace(help))
                     element.Add(new XElement("help", help));
 
@@ -174,7 +181,7 @@ namespace JSONSplitter
             return match.Success ? match.Groups[1].Value : null;
         }
 
-        public static string ToSentenceCaseKeepAllCaps(string input)
+        public static string ToIntelligentSentenceCase(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
                 return input;
@@ -182,74 +189,145 @@ namespace JSONSplitter
             var textInfo = CultureInfo.CurrentCulture.TextInfo;
             var result = new StringBuilder(input.Length);
             bool newSentence = true;
+            bool inWord = false;
 
-            for (int i = 0; i < input.Length;)
+            for (int i = 0; i < input.Length; i++)
             {
-                if (newSentence && char.IsLetter(input[i]))
+                char current = input[i];
+
+                if (newSentence && char.IsLetter(current))
                 {
-                    // Check if this is an ALL-CAPS word (like "RV", "NASA")
-                    if (IsAllCapsWord(input, i, out int wordLength))
+                    // Check for special word patterns
+                    if (IsSpecialWord(input, i, out int wordLength))
                     {
-                        // Keep the ALL-CAPS word as-is
+                        // Preserve special words exactly
                         result.Append(input.Substring(i, wordLength));
-                        i += wordLength;
+                        i += wordLength - 1;
                         newSentence = false;
+                        inWord = false;
                         continue;
                     }
                     else
                     {
                         // Normal sentence case - capitalize first letter
-                        result.Append(char.ToUpper(input[i]));
-                        i++;
+                        result.Append(char.ToUpper(current));
                         newSentence = false;
+                        inWord = true;
                         continue;
                     }
                 }
 
-                // Handle non-first letters
-                if (IsAllCapsWord(input, i, out int capsLength))
+                if (IsSpecialWord(input, i, out int specialLength))
                 {
-                    result.Append(input.Substring(i, capsLength));
-                    i += capsLength;
+                    result.Append(input.Substring(i, specialLength));
+                    i += specialLength - 1;
+                    inWord = false;
+                    continue;
+                }
+
+                // Handle regular characters
+                if (char.IsLetter(current))
+                {
+                    if (inWord)
+                    {
+                        result.Append(char.ToLower(current));
+                    }
+                    else
+                    {
+                        // Start of a new word (but not sentence start)
+                        if (IsSpecialWord(input, i, out specialLength))
+                        {
+                            result.Append(input.Substring(i, specialLength));
+                            i += specialLength - 1;
+                        }
+                        else
+                        {
+                            result.Append(char.ToLower(current));
+                        }
+                        inWord = true;
+                    }
                 }
                 else
                 {
-                    result.Append(char.ToLower(input[i]));
-                    i++;
+                    result.Append(current);
+                    inWord = false;
                 }
 
                 // Detect sentence endings
-                if (i > 0 && (input[i - 1] == '.' || input[i - 1] == '!' || input[i - 1] == '?'))
+                if (current == '.' || current == '!' || current == '?')
                 {
-                    newSentence = true;
+                    // Check if this is really an end of sentence
+                    if (i + 1 < input.Length && char.IsWhiteSpace(input[i + 1]))
+                    {
+                        newSentence = true;
+                    }
                 }
             }
 
             return result.ToString();
         }
 
-        private static bool IsAllCapsWord(string input, int startIndex, out int length)
+        private static bool IsSpecialWord(string input, int startIndex, out int length)
         {
             length = 0;
             int end = startIndex;
 
             // Find the whole word (letters only)
-            while (end < input.Length && char.IsLetter(input[end]))
+            while (end < input.Length && (char.IsLetter(input[end]) || input[end] == '\''))
             {
                 end++;
             }
 
             length = end - startIndex;
-            if (length < 2) return false; // Single letters aren't considered ALL-CAPS
+            if (length == 0) return false;
 
-            // Verify ALL letters are uppercase
-            for (int i = startIndex; i < end; i++)
+            // Check for ALL-CAPS words (must be at least 2 chars)
+            if (length >= 2)
             {
-                if (char.IsLetter(input[i]) && !char.IsUpper(input[i]))
-                    return false;
+                bool allCaps = true;
+                for (int i = startIndex; i < end; i++)
+                {
+                    if (char.IsLetter(input[i]) && !char.IsUpper(input[i]))
+                    {
+                        allCaps = false;
+                        break;
+                    }
+                }
+                if (allCaps) return true;
             }
 
-            return true;
+            // Check for PascalCase words
+            if (length >= 2 && char.IsUpper(input[startIndex]))
+            {
+                bool hasInternalCaps = false;
+                for (int i = startIndex + 1; i < end; i++)
+                {
+                    if (char.IsUpper(input[i]))
+                    {
+                        hasInternalCaps = true;
+                        break;
+                    }
+                }
+                if (hasInternalCaps) return true;
+            }
+
+            // Check for single capital letters
+            if (length == 1 && char.IsUpper(input[startIndex]))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string ToTitleCase(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+                return input;
+
+            var textInfo = CultureInfo.CurrentCulture.TextInfo;
+
+            return textInfo.ToTitleCase(input);
         }
     }
 }
